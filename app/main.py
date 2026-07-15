@@ -32,28 +32,38 @@ from app.schemas import (
 settings = get_settings()
 
 
-def _seed_if_empty() -> None:
-    """Demo convenience: on the hosted deployment we can't shell in on the free
-    tier, so — when SEED_ON_STARTUP is set — load the bundled sample data over
-    the internal DB connection. Guarded to run only when the events table is
-    empty, so cold-start restarts never re-seed. Never used locally (you run
-    scripts/load_sample_data.py explicitly)."""
+def _load_sample_async() -> None:
+    """Load the bundled sample file (runs in a background thread so /health stays
+    responsive during the ~15s load)."""
     try:
-        from app.database import SessionLocal
-        from app.models import Event
-
-        with SessionLocal() as db:
-            if db.execute(select(func.count()).select_from(Event)).scalar_one() > 0:
-                return  # already seeded
-
         sample = Path(__file__).resolve().parents[1] / "sample_events.json"
         if not sample.exists():
             return
         from scripts.load_sample_data import main as load_sample
         print("[seed] events table empty; loading bundled sample data...")
         load_sample(str(sample))
-    except Exception as exc:  # never let seeding break startup
+    except Exception as exc:  # never let seeding crash the process
         print(f"[seed] skipped: {exc}")
+
+
+def _seed_if_empty() -> None:
+    """Demo convenience: on the hosted deployment we can't shell in on the free
+    tier, so — when SEED_ON_STARTUP is set — self-load the bundled sample data
+    over the internal DB connection. Guarded to run only when the events table
+    is empty, so cold-start restarts never re-seed or wipe data. Never triggers
+    locally (there you run scripts/load_sample_data.py explicitly)."""
+    from app.database import SessionLocal
+    from app.models import Event
+
+    with SessionLocal() as db:
+        if db.execute(select(func.count()).select_from(Event)).scalar_one() > 0:
+            return  # already seeded
+
+    # We don't use Alembic here; since the DB is empty, rebuild the schema so it
+    # always matches the current models before the first load.
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    threading.Thread(target=_load_sample_async, daemon=True).start()
 
 
 @asynccontextmanager
@@ -61,8 +71,7 @@ async def lifespan(_: FastAPI):
     # For a take-home this is fine; a real service would use Alembic migrations.
     Base.metadata.create_all(bind=engine)
     if os.getenv("SEED_ON_STARTUP", "").lower() in ("1", "true", "yes"):
-        # Background thread so /health responds immediately while data loads.
-        threading.Thread(target=_seed_if_empty, daemon=True).start()
+        _seed_if_empty()
     yield
 
 

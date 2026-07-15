@@ -52,9 +52,11 @@ class Event(Base):
 
     event_id: Mapped[str] = mapped_column(String, primary_key=True)
     event_type: Mapped[str] = mapped_column(String, nullable=False)
-    transaction_id: Mapped[str] = mapped_column(
-        String, ForeignKey("transactions.transaction_id"), nullable=False
-    )
+    # NB: deliberately NOT a FK to transactions. The event log is the source of
+    # truth and the transactions row is *derived* from events, so events must not
+    # depend on the projection existing first (that dependency is backwards and
+    # breaks ingestion under enforced FKs, e.g. Postgres).
+    transaction_id: Mapped[str] = mapped_column(String, nullable=False)
     merchant_id: Mapped[str] = mapped_column(
         String, ForeignKey("merchants.merchant_id"), nullable=False
     )
@@ -68,8 +70,6 @@ class Event(Base):
     ingested_at: Mapped[datetime] = mapped_column(
         UTCDateTime, default=_utcnow, server_default=func.now()
     )
-
-    transaction: Mapped["Transaction"] = relationship(back_populates="events")
 
     __table_args__ = (
         # History lookups for a single transaction (GET /transactions/{id}).
@@ -136,8 +136,14 @@ class Transaction(Base):
     )
 
     merchant: Mapped["Merchant"] = relationship(back_populates="transactions")
+    # No DB-level FK links events -> transactions (see Event.transaction_id), so
+    # we spell out the join explicitly. viewonly: events are written directly by
+    # the ingestion path, never through this relationship.
     events: Mapped[list["Event"]] = relationship(
-        back_populates="transaction", order_by="Event.event_timestamp"
+        "Event",
+        primaryjoin="Transaction.transaction_id == foreign(Event.transaction_id)",
+        order_by="Event.event_timestamp",
+        viewonly=True,
     )
 
     __table_args__ = (
