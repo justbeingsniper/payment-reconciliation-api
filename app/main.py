@@ -51,19 +51,31 @@ def _seed_if_empty() -> None:
     tier, so — when SEED_ON_STARTUP is set — self-load the bundled sample data
     over the internal DB connection. Guarded to run only when the events table
     is empty, so cold-start restarts never re-seed or wipe data. Never triggers
-    locally (there you run scripts/load_sample_data.py explicitly)."""
-    from app.database import SessionLocal
-    from app.models import Event
+    locally (there you run scripts/load_sample_data.py explicitly).
 
-    with SessionLocal() as db:
-        if db.execute(select(func.count()).select_from(Event)).scalar_one() > 0:
-            return  # already seeded
+    Wrapped so a seeding hiccup only logs — it must never take down the app."""
+    try:
+        from app.database import SessionLocal
+        from app.models import Event
 
-    # We don't use Alembic here; since the DB is empty, rebuild the schema so it
-    # always matches the current models before the first load.
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    threading.Thread(target=_load_sample_async, daemon=True).start()
+        with SessionLocal() as db:
+            if db.execute(select(func.count()).select_from(Event)).scalar_one() > 0:
+                return  # already seeded
+
+        # No Alembic: since the DB is empty, rebuild the schema so it matches the
+        # current models. CASCADE clears any legacy constraints that are no longer
+        # in our metadata (e.g. an old events->transactions FK from a prior deploy).
+        with engine.begin() as conn:
+            if engine.dialect.name == "postgresql":
+                conn.execute(
+                    text("DROP TABLE IF EXISTS events, transactions, merchants CASCADE")
+                )
+            else:
+                Base.metadata.drop_all(bind=conn)
+        Base.metadata.create_all(bind=engine)
+        threading.Thread(target=_load_sample_async, daemon=True).start()
+    except Exception as exc:  # never let seeding break startup
+        print(f"[seed] skipped: {exc}")
 
 
 @asynccontextmanager
