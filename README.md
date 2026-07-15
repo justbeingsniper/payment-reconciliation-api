@@ -1,18 +1,21 @@
 # Setu — Payment Reconciliation Service
 
-A lightweight backend that ingests payment **lifecycle events**, keeps each
-transaction's **current state** up to date, and answers the questions an operations
-team actually asks: *which payments are stuck? what got settled that shouldn't have?
-how much settled per merchant, per day?*
+A lightweight backend that ingests payment lifecycle events, keeps each
+transaction's current state up to date, and answers the questions an operations
+team actually asks:
 
-Built with **FastAPI + SQLAlchemy 2.0**. It runs on **SQLite** locally (zero setup)
-and **PostgreSQL** in production — the *same* code, switched by a single environment
-variable.
+- Which payments are stuck?
+- What got settled that shouldn't have?
+- How much settled per merchant, per day?
+
+Built with **FastAPI** and **SQLAlchemy 2.0**. It runs on **SQLite** locally (zero
+setup) and **PostgreSQL** in production — the same code, switched by a single
+environment variable.
 
 - **Live demo:** https://setu-reconciliation.onrender.com &nbsp;·&nbsp; **Interactive API docs:** https://setu-reconciliation.onrender.com/docs
   <br/><sub>(Free tier sleeps when idle — the first request can take ~50s to wake it, then it's fast. Hit `/health` once to warm it up.)</sub>
 - **Postman collection:** [`postman_collection.json`](./postman_collection.json) — `base_url` is already pointed at the live demo.
-- **Demo video:** _<add your Loom/Drive walkthrough link here>_
+- **Demo video:** (add your Loom/Drive walkthrough link here)
 
 ---
 
