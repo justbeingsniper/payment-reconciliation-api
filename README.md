@@ -12,6 +12,7 @@ Built with **FastAPI** and **SQLAlchemy 2.0**. It runs on **SQLite** locally (ze
 setup) and **PostgreSQL** in production — the same code, switched by a single
 environment variable.
 
+- **Repository:** https://github.com/justbeingsniper/payment-reconciliation-api
 - **Live demo:** https://setu-reconciliation.onrender.com &nbsp;·&nbsp; **Interactive API docs:** https://setu-reconciliation.onrender.com/docs
   <br/><sub>(Free tier sleeps when idle — the first request can take ~50s to wake it, then it's fast. Hit `/health` once to warm it up.)</sub>
 - **Postman collection:** [`postman_collection.json`](./postman_collection.json) — `base_url` is already pointed at the live demo.
