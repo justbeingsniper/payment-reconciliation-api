@@ -6,7 +6,8 @@ and reconciliation state, and exposes operational + reconciliation APIs.
 Built with **FastAPI + SQLAlchemy 2.0**, running on **SQLite** locally (zero setup)
 and **PostgreSQL** in production — the same code, switched by one env var.
 
-- **Live demo:** `<FILL IN YOUR RENDER URL>` · Interactive docs: `<URL>/docs`
+- **Live demo:** https://setu-reconciliation.onrender.com · Interactive docs: https://setu-reconciliation.onrender.com/docs
+  *(Free tier sleeps when idle — the first request may take ~50s to wake it, then it's fast.)*
 - **Postman collection:** [`postman_collection.json`](./postman_collection.json)
 - **Demo walkthrough:** see [`DEMO_SCRIPT.md`](./DEMO_SCRIPT.md)
 
@@ -268,21 +269,27 @@ so concurrent events for the *same* transaction serialize cleanly.
 
 ## Deployment (Render)
 
+**Live:** https://setu-reconciliation.onrender.com — deployed on Render's free tier
+(web service + managed Postgres).
+
 The repo includes a [`Dockerfile`](./Dockerfile) and a [`render.yaml`](./render.yaml)
 blueprint that provisions the web service **and** a managed Postgres, wiring
 `DATABASE_URL` automatically.
 
-1. Push this repo to GitHub.
-2. Render dashboard → **New → Blueprint** → select the repo. It reads `render.yaml`.
-3. On first deploy, seed the database once from the Render **Shell**:
-   `python -m scripts.load_sample_data`
-4. Health check: `GET /health`. Docs: `/docs`.
+1. Render dashboard → **New → Blueprint** → point at this repo (or paste the public
+   repo URL). It reads `render.yaml` and creates both resources.
+2. **Deploy Blueprint.** On first boot the service **self-seeds** the bundled
+   `sample_events.json` over the internal DB connection — no shell access needed
+   (see `SEED_ON_STARTUP` in `render.yaml`; it's guarded to run only when the
+   events table is empty, so restarts never re-seed).
+3. Health check: `GET /health`. Docs: `/docs`.
 
 `config.py` normalizes Render's `postgres://` URL to the `postgresql+psycopg2://`
 form SQLAlchemy 2.x requires, so no manual URL editing is needed.
 
 > The same Docker image runs anywhere (Railway/Fly.io/any container host) — only the
-> `DATABASE_URL` env var changes.
+> `DATABASE_URL` env var changes. Locally you seed explicitly with
+> `python -m scripts.load_sample_data` (SEED_ON_STARTUP stays off).
 
 ---
 
