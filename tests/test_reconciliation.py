@@ -48,9 +48,30 @@ def test_discrepancies_detected(client):
     _seed(client)
     r = client.get("/reconciliation/discrepancies")
     assert r.status_code == 200
-    counts = r.json()["counts_by_type"]
+    body = r.json()
+    counts = body["counts_by_type"]
     assert counts["PROCESSED_NOT_SETTLED"] == 1
     assert counts["SETTLED_FOR_FAILED_PAYMENT"] == 1
+    # Two distinct transactions are flagged (txn-proc, txn-badsettle).
+    assert body["distinct_transactions"] == 2
+
+
+def test_discrepancy_total_counts_issue_rows_not_txns(client):
+    # A transaction flagged by two types appears once per type; total sums the
+    # per-type counts while distinct_transactions de-duplicates.
+    client.post("/events", json=event(event_id="x1", transaction_id="txn-multi",
+                                      event_type="payment_initiated"))
+    client.post("/events", json=event(event_id="x1", transaction_id="txn-multi",
+                                      event_type="payment_initiated"))  # duplicate
+    client.post("/events", json=event(event_id="x2", transaction_id="txn-multi",
+                                      event_type="payment_processed"))
+    body = client.get("/reconciliation/discrepancies").json()
+    # PROCESSED_NOT_SETTLED (1) + DUPLICATE_SUBMISSIONS (1) = 2 issue rows...
+    assert body["counts_by_type"]["PROCESSED_NOT_SETTLED"] == 1
+    assert body["counts_by_type"]["DUPLICATE_SUBMISSIONS"] == 1
+    assert body["pagination"]["total"] == 2
+    # ...but only 1 distinct transaction.
+    assert body["distinct_transactions"] == 1
 
 
 def test_discrepancy_type_filter(client):

@@ -154,7 +154,8 @@ SEARCH transactions USING INDEX ix_txn_recon_status (reconciliation_status=?)
 Base URL: your deployment, or `http://localhost:8000`. Full interactive schema at `/docs`.
 
 All errors share one envelope: `{"error": {"type": "...", "message": "...", "details": [...]}}`
-(`404` → `http_error`, `422` → `validation_error` with per-field `details`).
+— `404` → `http_error` (including unknown routes), `422` → `validation_error` with
+per-field `details`, and any unexpected `500` → `internal_error`.
 
 ### `POST /events` — ingest an event (idempotent)
 
@@ -194,8 +195,10 @@ Returns `{ pagination: { total, limit, offset, returned }, items: [...] }`.
 
 ### `GET /transactions/{transaction_id}` — details + history
 
-Returns transaction state, current status, merchant info, and the **full ordered
-event history**. `404` if unknown.
+Returns transaction state, current status, merchant info, and its ordered event
+history. History is bounded by `event_limit` (default 500, max 2000, most-recent
+first→chronological); `events_truncated` flags when a transaction has more events
+than were returned (`event_count` is always the true total). `404` if unknown.
 
 ### `GET /reconciliation/summary` — grouped summary
 
@@ -206,7 +209,10 @@ aggregates.
 
 ### `GET /reconciliation/discrepancies` — inconsistent transactions
 
-Optional `?type=` filter. Returns per-type counts plus paginated items.
+Optional `?type=` filter. Returns `counts_by_type`, `distinct_transactions`, and
+paginated `items`. A transaction can be flagged under more than one type, so it
+appears once per type; `pagination.total` counts issue-rows (the sum of
+`counts_by_type`) while `distinct_transactions` de-duplicates.
 
 | Type | Meaning | SQL predicate |
 |---|---|---|
@@ -262,8 +268,11 @@ Idempotency is enforced at the **database** layer, not in Python:
 
 This is race-safe under concurrency (two identical events arriving at once → the DB
 constraint lets exactly one win), unlike a read-then-write "have I seen this?" check.
-On Postgres, projection updates additionally take a `SELECT ... FOR UPDATE` row lock
-so concurrent events for the *same* transaction serialize cleanly.
+For the projection, ingestion first insert-ignores a bare `transactions` row, then
+takes a `SELECT ... FOR UPDATE` row lock on Postgres — so two concurrent *first*
+events for the same new transaction can't both try to INSERT it (which would 500);
+they serialize on the locked row instead. (FastAPI runs sync endpoints in a
+threadpool, so this races even on a single worker.)
 
 ---
 

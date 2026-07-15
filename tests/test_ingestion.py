@@ -80,3 +80,43 @@ def test_root_redirects_to_docs(client):
     r = client.get("/", follow_redirects=False)
     assert r.status_code in (307, 308)
     assert r.headers["location"] == "/docs"
+
+
+def test_unknown_route_uses_error_envelope(client):
+    # Framework-raised 404s go through the same envelope, not the default shape.
+    r = client.get("/definitely-not-a-route")
+    assert r.status_code == 404
+    assert r.json()["error"]["type"] == "http_error"
+
+
+def test_batch_ingest_and_idempotency(client):
+    batch = [
+        event(event_id="b1", transaction_id="txn-b", event_type="payment_initiated"),
+        event(event_id="b2", transaction_id="txn-b", event_type="payment_processed"),
+    ]
+    r = client.post("/events/batch", json=batch)
+    assert r.json() == {"received": 2, "created": 2, "duplicates": 0}
+
+    # Re-submitting the same batch changes nothing (idempotent).
+    r = client.post("/events/batch", json=batch)
+    assert r.json() == {"received": 2, "created": 0, "duplicates": 2}
+
+    txn = client.get("/transactions/txn-b").json()
+    assert txn["status"] == "PROCESSED"
+    assert txn["event_count"] == 2
+
+
+def test_event_history_is_bounded(client):
+    for i, et in enumerate(["payment_initiated", "payment_processed", "settled"]):
+        client.post("/events", json=event(event_id=f"h{i}", transaction_id="txn-h",
+                                          event_type=et))
+    full = client.get("/transactions/txn-h").json()
+    assert len(full["events"]) == 3
+    assert full["events_truncated"] is False
+
+    capped = client.get("/transactions/txn-h?event_limit=1").json()
+    assert len(capped["events"]) == 1
+    assert capped["events_truncated"] is True
+    assert capped["event_count"] == 3  # true total still reported
+    # Bounded history returns the most recent event.
+    assert capped["events"][0]["event_type"] == "settled"
