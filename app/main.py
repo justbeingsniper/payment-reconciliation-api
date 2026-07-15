@@ -1,6 +1,7 @@
 """FastAPI application: ingestion + transaction + reconciliation APIs."""
 import os
 import threading
+import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import queries, services
 from app.config import get_settings
@@ -19,7 +21,9 @@ from app.schemas import (
     DiscrepancyResponse,
     DiscrepancyType,
     EventIn,
+    EventOut,
     IngestResult,
+    MerchantOut,
     Page,
     PaginationMeta,
     ReconciliationStatus,
@@ -100,9 +104,11 @@ app = FastAPI(
 
 # --------------------------------------------------------------------------- #
 # Consistent error envelope: every error comes back as {"error": {...}}.
+# Registered against Starlette's HTTPException so it also covers framework-raised
+# errors like unknown-route 404s, not just our own raises.
 # --------------------------------------------------------------------------- #
-@app.exception_handler(HTTPException)
-async def http_exception_handler(_: Request, exc: HTTPException):
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(_: Request, exc: StarletteHTTPException):
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": {"type": "http_error", "message": exc.detail}},
@@ -120,6 +126,17 @@ async def validation_exception_handler(_: Request, exc: RequestValidationError):
                 "details": jsonable_encoder(exc.errors()),
             }
         },
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(_: Request, exc: Exception):
+    # Catch-all so unexpected server errors also return the envelope (and are
+    # logged) instead of an unstructured 500. Details are kept out of the body.
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"type": "internal_error", "message": "Internal server error"}},
     )
 
 
@@ -163,12 +180,15 @@ def ingest(event: EventIn, db: Session = Depends(get_db)):
 )
 def ingest_batch(events: list[EventIn], db: Session = Depends(get_db)):
     created = duplicates = 0
+    # Batch into one transaction: commit=False per event, commit once at the end.
+    # Far fewer round-trips than committing per event, and the batch is atomic.
     for e in events:
-        outcome, _ = services.ingest_event(db, e)
+        outcome, _ = services.ingest_event(db, e, commit=False)
         if outcome == "created":
             created += 1
         else:
             duplicates += 1
+    db.commit()
     return {"received": len(events), "created": created, "duplicates": duplicates}
 
 
@@ -224,13 +244,28 @@ def list_transactions(
     "/transactions/{transaction_id}",
     response_model=TransactionDetail,
     tags=["transactions"],
-    summary="Transaction details + merchant + full event history",
+    summary="Transaction details + merchant + event history",
 )
-def get_transaction(transaction_id: str, db: Session = Depends(get_db)):
-    txn = queries.get_transaction(db, transaction_id)
+def get_transaction(
+    transaction_id: str,
+    db: Session = Depends(get_db),
+    event_limit: int = Query(
+        500, ge=1, le=2000, description="Max events returned in the history"
+    ),
+):
+    txn, events = queries.get_transaction(db, transaction_id, event_limit=event_limit)
     if txn is None:
         raise HTTPException(status_code=404, detail="transaction not found")
-    return txn
+    # Build the response explicitly so the history stays capped (reading the ORM
+    # relationship would load every event). model_dump keeps Decimal (json-only
+    # serializer), so amounts stay exact.
+    base = TransactionOut.model_validate(txn).model_dump()
+    return TransactionDetail(
+        **base,
+        merchant=MerchantOut.model_validate(txn.merchant) if txn.merchant else None,
+        events=[EventOut.model_validate(e) for e in events],
+        events_truncated=(txn.event_count or 0) > len(events),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -279,7 +314,7 @@ def reconciliation_discrepancies(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    counts, total, items = queries.discrepancies(
+    counts, distinct_transactions, total, items = queries.discrepancies(
         db,
         dtype=type.value if type else None,
         merchant_id=merchant_id,
@@ -288,6 +323,7 @@ def reconciliation_discrepancies(
     )
     return DiscrepancyResponse(
         counts_by_type=counts,
+        distinct_transactions=distinct_transactions,
         pagination=PaginationMeta(
             total=total, limit=limit, offset=offset, returned=len(items)
         ),

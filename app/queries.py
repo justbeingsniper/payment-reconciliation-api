@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
 from app.database import engine
-from app.models import Transaction
+from app.models import Event, Transaction
 
 settings = get_settings()
 
@@ -78,12 +78,28 @@ def list_transactions(
 # --------------------------------------------------------------------------- #
 # GET /transactions/{id}
 # --------------------------------------------------------------------------- #
-def get_transaction(db: Session, transaction_id: str) -> Transaction | None:
-    return db.execute(
+def get_transaction(
+    db: Session, transaction_id: str, *, event_limit: int = 500
+) -> tuple[Transaction | None, list[Event]]:
+    """Return (transaction, event_history). History is bounded by event_limit
+    (most recent N, returned oldest-first) so a pathological transaction with a
+    huge event count can't blow up the response."""
+    txn = db.execute(
         select(Transaction)
         .where(Transaction.transaction_id == transaction_id)
-        .options(selectinload(Transaction.events), selectinload(Transaction.merchant))
+        .options(selectinload(Transaction.merchant))
     ).scalar_one_or_none()
+    if txn is None:
+        return None, []
+
+    events = db.execute(
+        select(Event)
+        .where(Event.transaction_id == transaction_id)
+        .order_by(Event.event_timestamp.desc())
+        .limit(event_limit)
+    ).scalars().all()
+    events.reverse()  # present chronologically (oldest first)
+    return txn, list(events)
 
 
 # --------------------------------------------------------------------------- #
@@ -228,7 +244,12 @@ def discrepancies(
     merchant_id: str | None,
     limit: int,
     offset: int,
-) -> tuple[dict[str, int], int, list[dict]]:
+) -> tuple[dict[str, int], int, int, list[dict]]:
+    """Returns (counts_by_type, distinct_transactions, total_issue_rows, items).
+
+    A transaction can be flagged under more than one type, so it appears once
+    per type in `items`; `total_issue_rows` sums the per-type counts while
+    `distinct_transactions` de-duplicates."""
     stuck_before = datetime.now(timezone.utc) - timedelta(
         hours=settings.stuck_threshold_hours
     )
@@ -244,6 +265,16 @@ def discrepancies(
             .select_from(Transaction)
             .where(_discrepancy_predicate(t, stuck_before), *base_filters)
         ).scalar_one()
+
+    # Distinct transactions flagged by ANY of the selected types.
+    distinct_transactions = db.execute(
+        select(func.count())
+        .select_from(Transaction)
+        .where(
+            or_(*[_discrepancy_predicate(t, stuck_before) for t in types]),
+            *base_filters,
+        )
+    ).scalar_one()
 
     # Build a single UNION-style result by iterating types in priority order.
     items: list[dict] = []
@@ -281,4 +312,4 @@ def discrepancies(
         if remaining_limit <= 0:
             break
 
-    return counts, total, items
+    return counts, distinct_transactions, total, items

@@ -9,8 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
 T = TypeVar("T")
 
 # Money: parsed/stored as Decimal for exactness, serialized to a JSON number so
-# API responses stay clean. (See models.py for why not float.)
-Money = Annotated[Decimal, PlainSerializer(lambda v: float(v), return_type=float)]
+# API responses stay clean. when_used="json" keeps Decimal in python-mode
+# model_dump() (so internal round-trips stay exact) and only floats for output.
+Money = Annotated[
+    Decimal,
+    PlainSerializer(lambda v: float(v), return_type=float, when_used="json"),
+]
 
 
 class EventType(str, Enum):
@@ -106,6 +110,9 @@ class TransactionOut(BaseModel):
 class TransactionDetail(TransactionOut):
     merchant: MerchantOut | None = None
     events: list[EventOut] = []
+    # True when the history was capped by event_limit (more events exist than
+    # were returned). event_count always reflects the true total.
+    events_truncated: bool = False
 
 
 class PaginationMeta(BaseModel):
@@ -160,6 +167,11 @@ class DiscrepancyItem(BaseModel):
 
 
 class DiscrepancyResponse(BaseModel):
+    # counts_by_type / items are per (transaction x discrepancy_type): one
+    # transaction can be flagged under multiple types and will appear once per
+    # type. `distinct_transactions` is the de-duplicated transaction count, and
+    # `pagination.total` counts issue-rows (the sum of counts_by_type).
     counts_by_type: dict[str, int]
+    distinct_transactions: int
     pagination: PaginationMeta
     items: list[DiscrepancyItem]
