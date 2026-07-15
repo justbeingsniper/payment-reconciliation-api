@@ -9,10 +9,10 @@ Built with **FastAPI + SQLAlchemy 2.0**. It runs on **SQLite** locally (zero set
 and **PostgreSQL** in production — the *same* code, switched by a single environment
 variable.
 
-- 🌐 **Live demo:** https://setu-reconciliation.onrender.com &nbsp;·&nbsp; **Interactive API docs:** https://setu-reconciliation.onrender.com/docs
+- **Live demo:** https://setu-reconciliation.onrender.com &nbsp;·&nbsp; **Interactive API docs:** https://setu-reconciliation.onrender.com/docs
   <br/><sub>(Free tier sleeps when idle — the first request can take ~50s to wake it, then it's fast. Hit `/health` once to warm it up.)</sub>
-- 📮 **Postman collection:** [`postman_collection.json`](./postman_collection.json) — `base_url` is already pointed at the live demo.
-- 🎥 **Demo video:** _<add your Loom/Drive walkthrough link here>_
+- **Postman collection:** [`postman_collection.json`](./postman_collection.json) — `base_url` is already pointed at the live demo.
+- **Demo video:** _<add your Loom/Drive walkthrough link here>_
 
 ---
 
@@ -443,8 +443,8 @@ the discrepancy types:
 
 | Event pattern per transaction | Count | Reconciliation outcome |
 |---|---|---|
-| initiated → processed → settled | 2,565 | clean ✅ |
-| initiated → failed | 570 | clean failure ✅ |
+| initiated → processed → settled | 2,565 | clean |
+| initiated → failed | 570 | clean failure |
 | initiated → processed (never settled) | **380** | `PROCESSED_NOT_SETTLED` |
 | initiated only (stuck) | **190** | `STUCK_PENDING` |
 | initiated → failed → settled | **95** | `SETTLED_FOR_FAILED_PAYMENT` |
