@@ -87,7 +87,19 @@ def ingest_event(
         .on_conflict_do_nothing(index_elements=["merchant_id"])
     )
 
-    # 2) Idempotent append to the event log. rowcount == 0 => duplicate.
+    # 2) Ensure the transaction row exists *before* we lock it. Otherwise two
+    #    concurrent first-events for the same new transaction would both find no
+    #    row and both try to INSERT it (duplicate-PK error, one request 500s).
+    #    FastAPI runs sync endpoints in a threadpool, so this races even on a
+    #    single worker. Insert-ignore makes the SELECT ... FOR UPDATE below
+    #    always find a row to serialize on. Column defaults fill the rest.
+    db.execute(
+        _insert_ignore(Transaction)
+        .values(transaction_id=event.transaction_id, merchant_id=event.merchant_id)
+        .on_conflict_do_nothing(index_elements=["transaction_id"])
+    )
+
+    # 3) Idempotent append to the event log. rowcount == 0 => duplicate.
     result = db.execute(
         _insert_ignore(Event)
         .values(
@@ -113,21 +125,13 @@ def ingest_event(
         txn = db.get(Transaction, event.transaction_id)
         return "duplicate", txn
 
-    # 3) Apply the (new) event to the transaction projection. Row-lock on
-    #    Postgres so concurrent events for the same txn serialize; harmless
-    #    no-op on SQLite (single writer).
+    # 4) Apply the (new) event to the transaction projection. The row is
+    #    guaranteed to exist (step 2); lock it on Postgres so concurrent events
+    #    for the same txn serialize (no-op on SQLite's single writer).
     q = db.query(Transaction).filter(Transaction.transaction_id == event.transaction_id)
     if engine.dialect.name == "postgresql":
         q = q.with_for_update()
-    txn = q.one_or_none()
-
-    if txn is None:
-        txn = Transaction(
-            transaction_id=event.transaction_id,
-            merchant_id=event.merchant_id,
-            first_seen_at=event.timestamp,
-        )
-        db.add(txn)
+    txn = q.one()
 
     flag_attr, ts_attr = _TYPE_TO_FLAG[event.event_type.value]
     setattr(txn, flag_attr, True)
