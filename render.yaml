@@ -16,8 +16,11 @@ services:
           property: connectionString
       - key: STUCK_THRESHOLD_HOURS
         value: "24"
-    # After first deploy, seed the DB once from the Render shell:
-    #   python -m scripts.load_sample_data
+      # Self-seed the bundled sample data on first boot (guarded: only when the
+      # events table is empty). Lets the free-tier demo populate itself over the
+      # internal DB connection without shell access. Set to "false" to disable.
+      - key: SEED_ON_STARTUP
+        value: "true"
 
 databases:
   - name: setu-db

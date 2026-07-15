@@ -1,12 +1,15 @@
 """FastAPI application: ingestion + transaction + reconciliation APIs."""
+import os
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app import queries, services
@@ -29,10 +32,37 @@ from app.schemas import (
 settings = get_settings()
 
 
+def _seed_if_empty() -> None:
+    """Demo convenience: on the hosted deployment we can't shell in on the free
+    tier, so — when SEED_ON_STARTUP is set — load the bundled sample data over
+    the internal DB connection. Guarded to run only when the events table is
+    empty, so cold-start restarts never re-seed. Never used locally (you run
+    scripts/load_sample_data.py explicitly)."""
+    try:
+        from app.database import SessionLocal
+        from app.models import Event
+
+        with SessionLocal() as db:
+            if db.execute(select(func.count()).select_from(Event)).scalar_one() > 0:
+                return  # already seeded
+
+        sample = Path(__file__).resolve().parents[1] / "sample_events.json"
+        if not sample.exists():
+            return
+        from scripts.load_sample_data import main as load_sample
+        print("[seed] events table empty; loading bundled sample data...")
+        load_sample(str(sample))
+    except Exception as exc:  # never let seeding break startup
+        print(f"[seed] skipped: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # For a take-home this is fine; a real service would use Alembic migrations.
     Base.metadata.create_all(bind=engine)
+    if os.getenv("SEED_ON_STARTUP", "").lower() in ("1", "true", "yes"):
+        # Background thread so /health responds immediately while data loads.
+        threading.Thread(target=_seed_if_empty, daemon=True).start()
     yield
 
 
