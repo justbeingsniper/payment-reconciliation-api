@@ -1,0 +1,26 @@
+# Render Blueprint — one-click deploy of the API + a managed Postgres.
+# In the Render dashboard: New > Blueprint > point at this repo.
+services:
+  - type: web
+    name: setu-reconciliation
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: setu-db
+          property: connectionString
+      - key: STUCK_THRESHOLD_HOURS
+        value: "24"
+    # After first deploy, seed the DB once from the Render shell:
+    #   python -m scripts.load_sample_data
+
+databases:
+  - name: setu-db
+    plan: free
+    databaseName: setu
+    ipAllowList: []

@@ -1,0 +1,234 @@
+{
+  "info": {
+    "name": "Setu Reconciliation Service",
+    "description": "Payment event ingestion, transaction queries, and reconciliation reporting.\n\nSet the `base_url` collection variable to your deployment (e.g. https://setu-reconciliation.onrender.com) or http://localhost:8000 for local.\n\nRun the requests top-to-bottom: the ingestion requests seed a demo transaction (txn_demo_001) that the later requests read back. The two 'Ingest ... (duplicate)' requests prove idempotency — the second returns HTTP 200 status=duplicate and does not change transaction state.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" },
+    { "key": "demo_txn", "value": "txn_demo_001" },
+    { "key": "demo_merchant", "value": "merchant_1" }
+  ],
+  "item": [
+    {
+      "name": "Meta",
+      "item": [
+        {
+          "name": "Root",
+          "request": { "method": "GET", "url": "{{base_url}}/" }
+        },
+        {
+          "name": "Health check",
+          "request": { "method": "GET", "url": "{{base_url}}/health" }
+        }
+      ]
+    },
+    {
+      "name": "1. Ingest events",
+      "item": [
+        {
+          "name": "Ingest payment_initiated",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/events",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"demo-evt-1\",\n  \"event_type\": \"payment_initiated\",\n  \"transaction_id\": \"{{demo_txn}}\",\n  \"merchant_id\": \"{{demo_merchant}}\",\n  \"merchant_name\": \"QuickMart\",\n  \"amount\": 2499.50,\n  \"currency\": \"INR\",\n  \"timestamp\": \"2026-02-01T10:00:00+00:00\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Ingest payment_processed",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/events",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"demo-evt-2\",\n  \"event_type\": \"payment_processed\",\n  \"transaction_id\": \"{{demo_txn}}\",\n  \"merchant_id\": \"{{demo_merchant}}\",\n  \"merchant_name\": \"QuickMart\",\n  \"amount\": 2499.50,\n  \"currency\": \"INR\",\n  \"timestamp\": \"2026-02-01T10:05:00+00:00\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Ingest settled",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/events",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"demo-evt-3\",\n  \"event_type\": \"settled\",\n  \"transaction_id\": \"{{demo_txn}}\",\n  \"merchant_id\": \"{{demo_merchant}}\",\n  \"merchant_name\": \"QuickMart\",\n  \"amount\": 2499.50,\n  \"currency\": \"INR\",\n  \"timestamp\": \"2026-02-01T18:00:00+00:00\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Ingest settled (DUPLICATE - proves idempotency)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('duplicate returns 200', () => pm.response.to.have.status(200));",
+                  "pm.test('flagged as duplicate', () => pm.expect(pm.response.json().status).to.eql('duplicate'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/events",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"demo-evt-3\",\n  \"event_type\": \"settled\",\n  \"transaction_id\": \"{{demo_txn}}\",\n  \"merchant_id\": \"{{demo_merchant}}\",\n  \"merchant_name\": \"QuickMart\",\n  \"amount\": 2499.50,\n  \"currency\": \"INR\",\n  \"timestamp\": \"2026-02-01T18:00:00+00:00\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Ingest batch",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/events/batch",
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"event_id\": \"demo-batch-1\",\n    \"event_type\": \"payment_initiated\",\n    \"transaction_id\": \"txn_demo_002\",\n    \"merchant_id\": \"merchant_2\",\n    \"merchant_name\": \"FreshBasket\",\n    \"amount\": 999.0,\n    \"currency\": \"INR\",\n    \"timestamp\": \"2026-02-02T09:00:00+00:00\"\n  },\n  {\n    \"event_id\": \"demo-batch-2\",\n    \"event_type\": \"payment_failed\",\n    \"transaction_id\": \"txn_demo_002\",\n    \"merchant_id\": \"merchant_2\",\n    \"merchant_name\": \"FreshBasket\",\n    \"amount\": 999.0,\n    \"currency\": \"INR\",\n    \"timestamp\": \"2026-02-02T09:02:00+00:00\"\n  }\n]"
+            }
+          }
+        },
+        {
+          "name": "Validation error (bad event_type -> 422)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/events",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_id\": \"bad-1\",\n  \"event_type\": \"not_a_real_type\",\n  \"transaction_id\": \"txn_x\",\n  \"merchant_id\": \"merchant_1\",\n  \"amount\": 10,\n  \"timestamp\": \"2026-02-01T10:00:00+00:00\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Transactions",
+      "item": [
+        {
+          "name": "List (default)",
+          "request": { "method": "GET", "url": "{{base_url}}/transactions" }
+        },
+        {
+          "name": "List filter by merchant + status + sort + paginate",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/transactions?merchant_id=merchant_1&status=SETTLED&sort_by=amount&sort_dir=desc&limit=10&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["transactions"],
+              "query": [
+                { "key": "merchant_id", "value": "merchant_1" },
+                { "key": "status", "value": "SETTLED" },
+                { "key": "sort_by", "value": "amount" },
+                { "key": "sort_dir", "value": "desc" },
+                { "key": "limit", "value": "10" },
+                { "key": "offset", "value": "0" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List filter by date range",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/transactions?start_date=2026-01-01T00:00:00Z&end_date=2026-02-01T00:00:00Z&limit=5",
+              "host": ["{{base_url}}"],
+              "path": ["transactions"],
+              "query": [
+                { "key": "start_date", "value": "2026-01-01T00:00:00Z" },
+                { "key": "end_date", "value": "2026-02-01T00:00:00Z" },
+                { "key": "limit", "value": "5" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List filter by reconciliation_status=DISCREPANCY",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/transactions?reconciliation_status=DISCREPANCY&limit=10"
+          }
+        },
+        {
+          "name": "Transaction detail (with event history)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/transactions/{{demo_txn}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Reconciliation",
+      "item": [
+        {
+          "name": "Summary by merchant",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/reconciliation/summary?group_by=merchant"
+          }
+        },
+        {
+          "name": "Summary by merchant + status",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/reconciliation/summary?group_by=merchant,status"
+          }
+        },
+        {
+          "name": "Summary by date",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/reconciliation/summary?group_by=date"
+          }
+        },
+        {
+          "name": "Discrepancies (all types)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/reconciliation/discrepancies?limit=20"
+          }
+        },
+        {
+          "name": "Discrepancies: processed but not settled",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/reconciliation/discrepancies?type=PROCESSED_NOT_SETTLED&limit=20"
+          }
+        },
+        {
+          "name": "Discrepancies: settled for failed payment",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/reconciliation/discrepancies?type=SETTLED_FOR_FAILED_PAYMENT&limit=20"
+          }
+        },
+        {
+          "name": "Discrepancies: conflicting state",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/reconciliation/discrepancies?type=CONFLICTING_STATE&limit=20"
+          }
+        },
+        {
+          "name": "Discrepancies: duplicate submissions",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/reconciliation/discrepancies?type=DUPLICATE_SUBMISSIONS&limit=20"
+          }
+        }
+      ]
+    }
+  ]
+}

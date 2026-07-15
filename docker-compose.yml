@@ -1,0 +1,31 @@
+# Local Postgres-backed run (production-faithful). For the zero-setup path,
+# skip this and just run `uvicorn app.main:app` (SQLite).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: setu
+      POSTGRES_PASSWORD: setu
+      POSTGRES_DB: setu
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U setu"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg2://setu:setu@db:5432/setu
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
