@@ -16,7 +16,7 @@ environment variable.
 - **Live demo:** https://setu-reconciliation.onrender.com &nbsp;·&nbsp; **Interactive API docs:** https://setu-reconciliation.onrender.com/docs
   <br/><sub>(Free tier sleeps when idle — the first request can take ~50s to wake it, then it's fast. Hit `/health` once to warm it up.)</sub>
 - **Postman collection:** [`postman_collection.json`](./postman_collection.json) — `base_url` is already pointed at the live demo.
-- **Demo video:** (add your Loom/Drive walkthrough link here)
+- **Demo video (4-part walkthrough):** [Part 1](https://www.loom.com/share/8b5c1573283f436784f7226896370710) · [Part 2](https://www.loom.com/share/f7625e01f9c3493b924f609268bc441b) · [Part 3](https://www.loom.com/share/5909f3803af645ffbb1d0a24b9dda5cf) · [Part 4](https://www.loom.com/share/7f13fc79dfec41ffb99c1fe5f4ea2488)
 
 ---
 
